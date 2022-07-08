@@ -7,5 +7,5 @@ class ClientApp
 
 	CSCA::SocketInfo GetTCPSocketInfo();
 public:
-	void Run(CSCA::SocketInfo socketInfo = { 0,0 });
+	void Run();
 };

@@ -15,7 +15,6 @@
 
 #pragma region Forward Declarations
 void SelectApplicationType();
-void GetTCPSocketInfo();
 
 bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
 #pragma endregion
@@ -24,7 +23,6 @@ namespace
 {
 	ClientApp gClient;
 	ServerApp gServer;
-	CSCA::SocketInfo gTCPSocketInfo;
 }
 
 int main()
@@ -43,49 +41,9 @@ int main()
 		<< "//                                                                                                           //\n"
 		<< "///////////////////////////////////////////////////////////////////////////////////////////////////////////////\n\n";
 
-	GetTCPSocketInfo();
-
 	SelectApplicationType();
 
 	return WSACleanup();
-}
-
-bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest)
-{
-	int start = 0;
-	int dotPos = 0;
-	for (int i = 0; i < 3; i++)
-	{
-		dotPos = ipAddrStr.find('.', start);
-		if (dotPos == std::string::npos)
-			return false;
-
-		dest[i] = std::stoi(ipAddrStr.substr(start, dotPos - start));
-		start = dotPos + 1;
-	}
-
-	dest[3] = std::stoi(ipAddrStr.substr(start));
-
-	return true;
-}
-
-void GetTCPSocketInfo()
-{
-	std::cout 
-		<< "         TCP Socket Info         \n"
-		<< "_________________________________\n";
-
-	// Get IP Address
-	do 
-	{
-		printf("Enter IP Address (IPv4): ");
-		std::cin >> gTCPSocketInfo.ipAddrStr;
-	} while (!ParseIPAddress(gTCPSocketInfo.ipAddrStr, gTCPSocketInfo.ipAddr));
-
-	// Get Port Number
-	printf("Enter Port Number: ");
-	std::cin >> gTCPSocketInfo.port;
-	printf("\n\n");
 }
 
 void SelectApplicationType()
@@ -106,5 +64,5 @@ void SelectApplicationType()
 	if (choice == 1)
 		gServer.Run();
 	else if (choice == 2)
-		gClient.Run(gTCPSocketInfo);
+		gClient.Run();
 }

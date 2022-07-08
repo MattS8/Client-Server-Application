@@ -3,7 +3,13 @@
 #include <iostream>
 #include <string>
 
-void ClientApp::Run(CSCA::SocketInfo socketInfo = {0,0,0,0,0})
+#pragma region Forward Declarations
+bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
+
+#pragma endregion
+
+
+void ClientApp::Run()
 {
 	gSocketInfo = GetTCPSocketInfo(); // TODO Listen over UDP for server connection
 
@@ -35,25 +41,6 @@ void ClientApp::Run(CSCA::SocketInfo socketInfo = {0,0,0,0,0})
 	}
 }
 
-bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest)
-{
-	int start = 0;
-	int dotPos = 0;
-	for (int i = 0; i < 3; i++)
-	{
-		dotPos = ipAddrStr.find('.', start);
-		if (dotPos == std::string::npos)
-			return false;
-
-		dest[i] = std::stoi(ipAddrStr.substr(start, dotPos - start));
-		start = dotPos + 1;
-	}
-
-	dest[3] = std::stoi(ipAddrStr.substr(start));
-
-	return true;
-}
-
 CSCA::SocketInfo ClientApp::GetTCPSocketInfo()
 {
 	std::cout
@@ -76,3 +63,27 @@ CSCA::SocketInfo ClientApp::GetTCPSocketInfo()
 
 	return socketInfo;
 }
+
+
+#pragma region Helper Functions
+bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest)
+{
+	int start = 0;
+	int dotPos = 0;
+	for (int i = 0; i < 3; i++)
+	{
+		dotPos = ipAddrStr.find('.', start);
+		if (dotPos == std::string::npos)
+			return false;
+
+		dest[i] = std::stoi(ipAddrStr.substr(start, dotPos - start));
+		start = dotPos + 1;
+	}
+
+	dest[3] = std::stoi(ipAddrStr.substr(start));
+
+	return true;
+}
+
+#pragma endregion
+
