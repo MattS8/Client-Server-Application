@@ -25,6 +25,8 @@ namespace
 	ServerApp gServer;
 }
 
+// Text Art Generated at https://patorjk.com/
+
 int main()
 {
 	WSADATA wsadata;
