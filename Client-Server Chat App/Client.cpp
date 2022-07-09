@@ -1,16 +1,28 @@
 #include "Client.h"
-#include <winsock2.h>
 #include <iostream>
 #include <string>
+
+#define _CRT_SECURE_NO_WARNINGS                 // turns of deprecated warnings
+#define _WINSOCK_DEPRECATED_NO_WARNINGS         // turns of deprecated warnings for winsock
+#include <winsock2.h>
+//#include <ws2tcpip.h>                         // only need if you use inet_pton
+#pragma comment(lib,"Ws2_32.lib")
 
 #pragma region Forward Declarations
 bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
 
 #pragma endregion
 
+// Text Art Generated at https://patorjk.com/
 
 void ClientApp::Run()
 {
+	std::cout 
+		<< "____ _    _ ____ _  _ ___    _  _ ____ ___  ____   \n"
+		<< "|    |    | |___ |\\ |  |     |\\/| |  | |  \\ |___ . \n"
+		<< "|___ |___ | |___ | \\|  |     |  | |__| |__/ |___ . \n"
+		<< "                                                   \n";
+
 	gSocketInfo = GetTCPSocketInfo(); // TODO Listen over UDP for server connection
 
 	// Create comm socket
@@ -37,7 +49,6 @@ void ClientApp::Run()
 	else
 	{
 		std::cout << ">> Successfully connected to: " << gSocketInfo.ipAddrStr << "\n";
-		printf("DEBUG// I used the Connect function\n");
 	}
 }
 
