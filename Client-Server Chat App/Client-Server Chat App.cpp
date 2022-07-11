@@ -1,6 +1,6 @@
 ﻿// Client-Server Chat App.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
-
+#define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS                 // turns of deprecated warnings
 #define _WINSOCK_DEPRECATED_NO_WARNINGS         // turns of deprecated warnings for winsock
 #include <winsock2.h>
@@ -61,6 +61,12 @@ void SelectApplicationType()
 		printf("2) Client\n");
 		printf("> ");
 		std::cin >> choice;
+		if (std::cin.fail())
+		{
+			std::cin.clear();
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
+		
 	} while (choice != 1 && choice != 2);
 
 	if (choice == 1)

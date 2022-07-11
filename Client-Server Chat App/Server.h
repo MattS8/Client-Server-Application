@@ -10,6 +10,9 @@
 
 class ServerApp
 {
+private:
+	bool gShowListeningStatus = true;
+
 	const uint8_t MaxServerCapacity = 10;
 
 	SOCKET gListenSocket;
@@ -38,13 +41,21 @@ class ServerApp
 		CSCA::ClientConnection* clientConnection,
 		std::string message);
 
-	void RegisterClient(SOCKET socket, std::string username);
-
-	void RemoveClient(SOCKET clientSocket);
+	void RemoveClient(SOCKET clientSocket, 
+		CSCA::ClientConnection* clientConnection, bool logRemoval = true);
 
 	void LogEvent(std::string eventStr);
 
-	void SendClientMessage(SOCKET socket, std::string message);
+	void LogRegister(CSCA::ClientConnection* clientConnection);
+
+	void LogDisconnect(CSCA::ClientConnection* clientConnection);
+
+	void LogExit(CSCA::ClientConnection* clientConnection);
+
+	bool SendToAllClients(std::string message, std::string username);
+
+	void SendClientMessage(SOCKET socket, 
+		CSCA::ClientConnection* clientConnection, std::string message);
 
 public:
 	void Run();

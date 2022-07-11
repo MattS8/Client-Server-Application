@@ -16,7 +16,7 @@ void ServerApp::Run()
 	gListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (gListenSocket == INVALID_SOCKET)
 	{
-		std::cerr << ">> ERROR: Unable to create communication socket!\n";
+		std::cerr << "\n>> ERROR: Unable to create communication socket!\n";
 		return;
 	}
 
@@ -29,7 +29,7 @@ void ServerApp::Run()
 	int result = bind(gListenSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr));
 	if (result == SOCKET_ERROR)
 	{
-		std::cerr << ">> ERROR: Failed to bind server socket!\n";
+		std::cerr << "\n>> ERROR: Failed to bind server socket!\n";
 		return;
 	}
 
@@ -37,7 +37,7 @@ void ServerApp::Run()
 	result = listen(gListenSocket, 1);
 	if (result == SOCKET_ERROR)
 	{
-		std::cerr << ">> ERROR: Unable to listen on server socket!\n";
+		std::cerr << "\n>> ERROR: Unable to listen on server socket!\n";
 		return;
 	}
 
@@ -45,8 +45,6 @@ void ServerApp::Run()
 	FD_ZERO(&gMasterSet);
 	FD_ZERO(&gReadySet);
 	FD_SET(gListenSocket, &gMasterSet);
-
-	ShowListeningStatus();
 
 	// Select statement
 	do 
@@ -57,6 +55,8 @@ void ServerApp::Run()
 		// Timeout
 		if (rc == 0)
 		{
+			if (gShowListeningStatus)
+				ShowListeningStatus();
 			static int dotCount = 0;
 			if (dotCount >= 30)
 			{
@@ -95,8 +95,9 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 
 	if (itConnection == gConnectedUsers.end())
 	{
-		std::cerr << ">> ERROR: Attempted to receive connection on socket "
+		std::cerr << "\n>> ERROR: Attempted to receive connection on socket "
 			<< socket << " but no ClientConnection was found!\n";
+		gShowListeningStatus = true;;
 		return;
 	}
 
@@ -110,9 +111,10 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 		result = recv(socket, &msgLength, 1, 0);
 		if (result < 1)
 		{
-			std::cerr << ">> ERROR: Unable to read message length for socket "
+			std::cerr << "\n>> ERROR: Unable to read message length for socket "
 				<< socket << "!\n";
-			RemoveClient(socket);
+			gShowListeningStatus = true;;
+			RemoveClient(socket, connection);
 			return;
 		}
 
@@ -120,12 +122,13 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 
 		if (connection->messageSize < 1)
 		{
-			std::cerr << ">> ERROR: Invalid message size read in on socket "
+			std::cerr << "\n>> ERROR: Invalid message size read in on socket "
 				<< socket << " (" << connection->messageSize << ")!\n";
-			RemoveClient(socket);
+			gShowListeningStatus = true;;
+			RemoveClient(socket, connection);
 			return;
 		}
-		connection->messageBuffer = new char[connection->messageSize];
+		connection->messageBuffer = new char[connection->messageSize + 1];
 		connection->bytesRead = 0;
 	}
 	else
@@ -136,21 +139,23 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 	
 		if (result == 0)
 		{
-			RemoveClient(socket);
+			RemoveClient(socket, connection);
 			return;
 		}
 		if (result == SOCKET_ERROR)
 		{
-			std::cerr << ">> ERROR: Unable to read client message on socket "
+			std::cerr << "\n>> ERROR: Unable to read client message on socket "
 				<< socket << " (SOCKET_ERROR)!\n";
-			RemoveClient(socket);
+			gShowListeningStatus = true;;
+			RemoveClient(socket, connection);
 			return;
 		}
 
-		connection->bytesRead + result;
+		connection->bytesRead += result;
 
 		if (connection->bytesRead >= connection->messageSize)
 		{
+			connection->messageBuffer[connection->messageSize] = '\0';
 			// Handle full message received
 			if (HandleClientMessage(socket, connection))
 			{
@@ -166,39 +171,57 @@ bool ServerApp::HandleRegisterClient(SOCKET socket,
 	CSCA::ClientConnection* clientConnection,
 	std::string message)
 {
-	// Handle SV_FULL
-	if (gConnectedUsers.size() >= MaxServerCapacity)
-	{
-		SendClientMessage(socket, "SV_FULL");
-		LogEvent("$register - Refused client due to max server capacity.");
-		RemoveClient(socket);
-		return false;
-	}
-
 	size_t startOfUsername = message.find(" ");
 	if (startOfUsername == std::string::npos)
 	{
-		std::cerr << ">> ERROR: Register event received however "
+		std::cerr << "\n>> ERROR: Register event received however "
 			<< "no username was accompanying it!\n";
-		LogEvent("$register - No username associated with register event.");
-		RemoveClient(socket);
+		gShowListeningStatus = true;;
+		LogEvent("$register - ERROR: No username associated with register event.");
+		RemoveClient(socket, clientConnection, false);
 		return false;
 	}
-
 	std::string username = message.substr(startOfUsername + 1);
+
+	if (clientConnection->clientUsername.compare("") == 0)
+	{
+		// Handle SV_FULL
+		if (gConnectedUsers.size() >= MaxServerCapacity)
+		{
+			SendClientMessage(socket, clientConnection, "SV_FULL");
+			std::cout << "> Refised client due to max server capacity!\n";
+			gShowListeningStatus = true;;
+			LogEvent("$register - Refused client due to max server capacity.");
+			RemoveClient(socket, clientConnection, false);
+			return false;
+		}
+	}
+	else
+	{
+		gUsernames.erase(clientConnection->clientUsername);
+		std::cout << "\n> Changing client username from '" << clientConnection->clientUsername
+			<< "' to '" << username << ".\n";
+	}
+
 	if (gUsernames.find(username) != gUsernames.end())
 	{
-		std::cerr << ">> ERROR: Client tried to register with a username that "
+		std::cerr << "\n>> ERROR: Client tried to register with a username that "
 			<< "has already been claimed!\n";
-		LogEvent("$register - Duplicate username registration.");
-		RemoveClient(socket);
-		return false;
+		gShowListeningStatus = true;;
+		std::string logMsg = "$register ERROR: - Duplicate username registration (";
+		logMsg.append(username); logMsg.append(")");
+		LogEvent(logMsg);
+		SendClientMessage(socket, clientConnection, "SV_USERNAME_TAKEN");
+		return true;
 	}
 	
 	clientConnection->clientUsername = username;
 	gUsernames.insert(std::pair<std::string, SOCKET>(username, socket));
-	LogEvent("$register - User registered.");
-	SendClientMessage(socket, "SV_SUCCESS");
+	LogRegister(clientConnection);
+	SendClientMessage(socket, clientConnection, "SV_REGISTER_SUCCESS");
+
+	std::cout << "\n> Registered client under '" << username << "'!\n";
+	gShowListeningStatus = true;;
 
 	return true;
 }
@@ -210,35 +233,38 @@ bool ServerApp::HandleClientMessage(SOCKET socket, CSCA::ClientConnection* clien
 	if (message[0] == '$')
 	{
 		std::string command = message.find(" ") == std::string::npos
-			? message.substr(0, message.find(" "))
-			: message;
+			? message
+			: message.substr(0, message.find(" "));
 		if (command.compare("$register") == 0)
 		{
 			return HandleRegisterClient(socket, clientConnection, message);
 		}
 		else if (command.compare("$getlist") == 0)
 		{
-
+			return true;
 		}
 		else if (command.compare("$getlog") == 0)
 		{
-
+			return true;
 		}
 		else if (command.compare("$exit") == 0)
 		{
-			RemoveClient(socket);
+			LogExit(clientConnection);
+			RemoveClient(socket, clientConnection, false);
 			return false;
 		}
 		else
 		{
-			std::cerr << ">> ERROR: Unknown client command received: "
+			std::cerr << "\n>> ERROR: Unknown client command received: "
 				<< command << "!\n";
-			return;
+			gShowListeningStatus = true;;
+			return true;
 		}
 	}
 	else
 	{
 		// Handle Normal Message
+		return SendToAllClients(message, clientConnection->clientUsername);
 	}
 }
 
@@ -248,12 +274,13 @@ void ServerApp::AcceptNewClient()
 	SOCKET commSocket = accept(gListenSocket, NULL, NULL);
 	if (commSocket == INVALID_SOCKET)
 	{
-		std::cerr << ">> ERROR: Failed to accept on listenSocket!\n";
+		std::cerr << "\n>> ERROR: Failed to accept on listenSocket!\n";
 		return;
 	}
 	else
 	{
-		std::cout << "> Received new connection!\n";
+		std::cout << "\n> Received new connection!\n";
+		gShowListeningStatus = true;;
 		FD_SET(commSocket, &gMasterSet);
 		if (gConnectedUsers.find(commSocket) == gConnectedUsers.end())
 		{
@@ -268,13 +295,128 @@ void ServerApp::AcceptNewClient()
 		}
 		else
 		{
-			std::cerr << ">> ERROR: Connection on socket " << commSocket
+			std::cerr << "\n>> ERROR: Connection on socket " << commSocket
 				<< " was already established!\n";
 		}
 	}
 }
 
+bool ServerApp::SendToAllClients(std::string message, std::string username)
+{
+	std::string realMessage = "SV_CLIENT_MESSAGE ";
+	realMessage.append(username);
+	realMessage.append(": ");
+	realMessage.append(message);
+	for (auto it = gConnectedUsers.begin(); it != gConnectedUsers.end(); it++)
+	{
+		if (it->second->clientUsername.compare(username) != 0)
+			SendClientMessage(it->first, it->second, realMessage);
+	}
+
+	return true;
+}
+
+void ServerApp::SendClientMessage(SOCKET socket, 
+	CSCA::ClientConnection* clientConnection, std::string message)
+{
+	int result, bytesSent = 0;
+	size_t msgSize = message.size();
+
+	// Send message length
+	while (bytesSent < 1)
+	{
+		
+		result = send(socket, (const char*)&msgSize, 1, 0);
+		if (result == 0)
+		{
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+		if (result == SOCKET_ERROR)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< socket << " (SOCKET_ERROR)!\n";
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+		bytesSent += result;
+	}
+
+	// Send actual message
+	bytesSent = 0;
+	while (bytesSent < msgSize)
+	{
+		result = send(socket, (const char*)message.c_str() + bytesSent,
+			msgSize - bytesSent, 0);
+		if (result < 0)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< socket << " (SOCKET_ERROR)!\n";
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+		bytesSent += result;
+	}
+}
+
+void ServerApp::RemoveClient(SOCKET clientSocket, 
+	CSCA::ClientConnection* clientConnection, bool logRemoval)
+{
+	if (logRemoval)
+	{
+		LogDisconnect(clientConnection);
+	}
+
+	if (clientConnection != nullptr)
+	{
+		gUsernames.erase(clientConnection->clientUsername);
+		if (clientConnection->messageBuffer != nullptr)
+			delete[] clientConnection->messageBuffer;
+		delete clientConnection;
+	}
+
+	FD_CLR(clientSocket, &gMasterSet);
+	gConnectedUsers.erase(clientSocket);
+	closesocket(clientSocket);
+}
+
+void ServerApp::LogDisconnect(CSCA::ClientConnection* clientConnection)
+{
+	if (clientConnection != nullptr)
+	{
+		std::string logMsg = clientConnection->clientUsername;
+		logMsg.append(" disconnected from the server.");
+		LogEvent(logMsg);
+	}
+}
+
+void ServerApp::LogExit(CSCA::ClientConnection* clientConnection)
+{
+	if (clientConnection != nullptr)
+	{
+		std::string logMsg = "$exit - ";
+		logMsg.append(clientConnection->clientUsername);
+		LogEvent(logMsg);
+	}
+}
+
+void ServerApp::LogRegister(CSCA::ClientConnection* clientConnection)
+{
+	if (clientConnection != nullptr)
+	{
+		std::string logMsg = "$register - ";
+		logMsg.append(clientConnection->clientUsername);
+		LogEvent(logMsg);
+	}
+}
+
+void ServerApp::LogEvent(std::string eventStr)
+{
+
+}
+
 void ServerApp::ShowListeningStatus()
 {
 	std::cout << "\tListening for actions... ";
+	gShowListeningStatus = false;
 }
