@@ -11,24 +11,34 @@
 
 class ClientApp
 {
-	enum ClientState { NONE, QUERY_ACTION};
+	enum ClientState { 
+		NONE, CONNECT_TO_SERVER, REGISTER_USERNAME, QUERY_ACTION, WAIT_FOR_MESSAGES, GETTING_CLIENT_LIST
+	};
 
 	ClientState gClientState = NONE;
+
+	bool gIsRegisteredWithServer = false;
+	bool gIsConnectedToServer = false;
 
 	CSCA::SocketInfo gSocketInfo;
 	SOCKET gComSocket;
 
 	fd_set gMasterSet;
-	fd_set gReadySet;
-
-	CSCA::ClientConnection gServerMessage;
+	fd_set gReadReadySet;
+	fd_set gSendReadySet;
 
 	timeval gTimeout = {
-	0,	// Seconds
-	50000	// Microseconds
+		0,	// Seconds
+		50000	// Microseconds
 	};
 
+	CSCA::ClientConnection gServerMessage;
+	CSCA::ClientConnection gSendMessage;
 	CSCA::SocketInfo QueryTCPSocketInfo();
+
+	void DisplayOptions(bool bSetState = true);
+	void ConnectToServer();
+	bool WithinRange(int choice);
 public:
 	void Run();
 
@@ -36,9 +46,11 @@ public:
 
 	void SendMessage(std::string message);
 
-	void ReceiveServerMessage(SOCKET socket);
+	bool ReceiveServerMessage(SOCKET socket);
 
 	bool HandleServerMessage();
+
+	void WaitForMessages();
 
 	void Exit(bool sendExitMessage = true);
 

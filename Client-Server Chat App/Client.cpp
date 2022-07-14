@@ -6,23 +6,19 @@ bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
 
 #pragma endregion
 
+
 // Text Art Generated at https://patorjk.com/
 
-void ClientApp::Run()
+void ClientApp::ConnectToServer()
 {
-	std::cout 
-		<< "____ _    _ ____ _  _ ___    _  _ ____ ___  ____   \n"
-		<< "|    |    | |___ |\\ |  |     |\\/| |  | |  \\ |___ . \n"
-		<< "|___ |___ | |___ | \\|  |     |  | |__| |__/ |___ . \n"
-		<< "                                                   \n";
-
 	gSocketInfo = QueryTCPSocketInfo(); // TODO Listen over UDP for server connection
 
-	// Create comm socket
+// Create comm socket
 	gComSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (gComSocket == INVALID_SOCKET)
 	{
 		std::cerr << ">> ERROR: Unable to create communication socket!\n";
+		exit(-1);
 		return;
 	}
 
@@ -37,42 +33,46 @@ void ClientApp::Run()
 	if (result == SOCKET_ERROR)
 	{
 		std::cerr << ">> ERROR: Failed to connect to: " << gSocketInfo.ipAddrStr << "\n";
+		Exit();
 		return;
 	}
 	else
 	{
 		std::cout << ">> Successfully connected to: " << gSocketInfo.ipAddrStr << "\n";
 	}
+	gIsConnectedToServer = true;
+}
 
+void ClientApp::Run()
+{
+	std::cout 
+		<< "____ _    _ ____ _  _ ___    _  _ ____ ___  ____   \n"
+		<< "|    |    | |___ |\\ |  |     |\\/| |  | |  \\ |___ . \n"
+		<< "|___ |___ | |___ | \\|  |     |  | |__| |__/ |___ . \n"
+		<< "                                                   \n";
+
+	ConnectToServer();
+
+	gClientState = QUERY_ACTION;
 	FD_SET(gComSocket, &gMasterSet);
 	while (true)
 	{
+		if (gClientState == CONNECT_TO_SERVER)
+			ConnectToServer();
+
 		gReadySet = gMasterSet;
 		int rc = select(0, &gReadySet, NULL, NULL, &gTimeout);
 
-		if (rc != 0)
+		for (int i = 0; i < gReadySet.fd_count; i++)
 		{
-			for (int i = 0; i < gReadySet.fd_count; i++)
-			{
-				if (gReadySet.fd_array[i] == _fileno(stdin))
-					QueryUserAction();
-				ReceiveServerMessage(gReadySet.fd_array[i]);
-			}
+			if (!ReceiveServerMessage(gReadySet.fd_array[i]))
+				continue;
 		}
-		else
+
+		if (gClientState == QUERY_ACTION)
 		{
-			if (gClientState == NONE)
-			{
-				std::cout
-					<< "\n          Select Action         \n"
-					<< "_________________________________\n"
-					<< "1) Set Username\n"
-					<< "2) Send Message\n"
-					<< "3) Get List of Users\n"
-					<< "4) Get Logs\n"
-					<< "5) Exit\n";
-				gClientState = QUERY_ACTION;
-			}
+			DisplayOptions();
+			QueryUserAction();
 		}
 	}
 }
@@ -81,9 +81,12 @@ void ClientApp::LeaveServer()
 {
 	FD_CLR(gComSocket, &gMasterSet);
 	closesocket(gComSocket);
+	gClientState = CONNECT_TO_SERVER;
+	gIsConnectedToServer = false;
+	gIsRegisteredWithServer = false;
 }
 
-void ClientApp::ReceiveServerMessage(SOCKET socket)
+bool ClientApp::ReceiveServerMessage(SOCKET socket)
 {
 
 	int result;
@@ -97,7 +100,7 @@ void ClientApp::ReceiveServerMessage(SOCKET socket)
 			std::cerr << "\n>> ERROR: Unable to read message length for socket "
 				<< socket << "!\n";
 			LeaveServer();
-			return;
+			return false;
 		}
 
 		gServerMessage.messageSize = (uint8_t)msgLength;
@@ -107,7 +110,7 @@ void ClientApp::ReceiveServerMessage(SOCKET socket)
 			std::cerr << "\n>> ERROR: Invalid message size read in on socket "
 				<< socket << " (" << gServerMessage.messageSize << ")!\n";
 			LeaveServer();
-			return;
+			return false;
 		}
 		gServerMessage.messageBuffer = new char[gServerMessage.messageSize + 1];
 		gServerMessage.bytesRead = 0;
@@ -121,14 +124,14 @@ void ClientApp::ReceiveServerMessage(SOCKET socket)
 		if (result == 0)
 		{
 			LeaveServer();
-			return;
+			return false;
 		}
 		if (result == SOCKET_ERROR)
 		{
 			std::cerr << "\n>> ERROR: Unable to read client message on socket "
 				<< socket << " (SOCKET_ERROR)!\n";
 			LeaveServer();
-			return;
+			return false;
 		}
 
 		gServerMessage.bytesRead += result;
@@ -143,8 +146,11 @@ void ClientApp::ReceiveServerMessage(SOCKET socket)
 				gServerMessage.messageBuffer = nullptr;
 				gServerMessage.messageSize = 0;
 			}
+			gClientState = QUERY_ACTION;
 		}
 	}
+
+	return true;
 }
 
 bool ClientApp::HandleServerMessage()
@@ -155,25 +161,48 @@ bool ClientApp::HandleServerMessage()
 		? serverMessage
 		: serverMessage.substr(0, serverMessage.find(" "));
 
-	if (msgType.compare("SV_FULL") == 0)
+	if (msgType.compare(CSCA::SV_FULL) == 0)
 	{
 		std::cout << "\n>> ERROR: Server is full!\n";
 		return true;
 	}
-	else if (msgType.compare("SV_USERNAME_TAKEN") == 0)
+	else if (msgType.compare(CSCA::SV_USERNAME_TAKEN) == 0)
 	{
 		std::cout << "\n>> ERROR: Username already taken!\n";
 		return true;
 	}
-	else if (msgType.compare("SV_REGISTER_SUCCESS") == 0)
+	else if (msgType.compare(CSCA::SV_REGISTER_SUCCESS) == 0)
 	{
 		std::cout << "\n>> Registered as '" << gServerMessage.clientUsername << "'!\n";
+		gIsRegisteredWithServer = true;
 		return true;
 	}
-	else if (msgType.compare("SV_CLIENT_MESSAGE") == 0)
+	else if (msgType.compare(CSCA::SV_CLIENT_LIST) == 0)
 	{
-		std::cout << "\n__Incoming Message__\n>"
-			<< serverMessage.substr(serverMessage.find(" ")+1);
+		std::cout
+			<< "\n        List of Users:         \n"
+			<< "_________________________________\n\n";
+		std::string userList = serverMessage.substr(serverMessage.find(" ")+1);
+		size_t endPos = userList.find("\n");
+
+		while (true)
+		{
+			std::string username = userList;
+			username = username.substr(0, endPos+1);
+			std::cout << "> " << username;
+			endPos = userList.find("\n");
+			if (endPos == std::string::npos || (endPos+1) >= userList.size())
+				break;
+			userList = userList.substr(endPos + 1);
+		}
+		std::cout << "_________________________________\n";
+		return true;
+	}
+	else if (msgType.compare(CSCA::SV_CLIENT_MESSAGE) == 0)
+	{
+		std::cout << "\n> "
+			<< serverMessage.substr(serverMessage.find(" ")+1)
+			<< "\n_________________________________\n\n";
 		return true;
 	}
 	else
@@ -191,33 +220,76 @@ static std::string getChoice()
 	return std::to_string(choice);
 }
 
+bool ClientApp::WithinRange(int choice)
+{
+	if (gIsRegisteredWithServer)
+		return choice >= 1 && choice <= 6;
+	else
+		return choice >= 1 && choice <= 2;
+}
+
 void ClientApp::QueryUserAction()
 {
 	int choice = -1;
 	do
 	{
 		std::cin >> choice;
-		std::cin.clear();
-		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-	} while (choice < 1 || choice > 5);
+		if (std::cin.fail())
+		{
+			std::cin.clear();
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
+
+	} while (!WithinRange(choice));
+
 	switch (choice)
 	{
 	case 1:
 		RegisterClient(QueryUsername());
-		break;
+		gClientState = REGISTER_USERNAME;
+		return;
 	case 2:
-		SendMessage(QueryClientMessage());
+		if (gIsRegisteredWithServer)
+		{
+			SendMessage(QueryClientMessage());
+		}
+		else
+		{
+			Exit();
+			return;
+		}
+		break;
+	case 3:
+		SendMessage(CSCA::SV_GET_CLIENT_LIST);
+		gClientState = GETTING_CLIENT_LIST;
+		return;
+	case 5:
+		WaitForMessages();
+		return;
+	case 6:
+		Exit();
+		return;
 	default:
 		break;
 	}
+
+	gClientState = QUERY_ACTION;
+}
+
+void ClientApp::WaitForMessages()
+{
+	gClientState = WAIT_FOR_MESSAGES;
+	std::cout
+		<< "\n   Listening For Message...    \n"
+		<< "_________________________________\n";
 }
 
 void ClientApp::SendMessage(std::string message)
 {
 	int result, bytesSent = 0;
-	size_t msgSize = message.size();
+	size_t msgSize = message.size() + 1;
 
-	while (bytesSent < 1)
+	while (bytesSent < 1 && msgSize > 0)
 	{
 		// Send message length
 		result = send(gComSocket, (const char*)&msgSize, 1, 0);
@@ -255,32 +327,62 @@ void ClientApp::SendMessage(std::string message)
 void ClientApp::RegisterClient(std::string username)
 {
 	gServerMessage.clientUsername = username;
-	std::string registerMsg = "$register ";
+	std::string registerMsg = CSCA::SV_REGISTER_USERNAME;
+	registerMsg.append(" ");
 	SendMessage(registerMsg.append(username));
 }
 
 void ClientApp::Exit(bool sendExitMessage /* = true */)
 {
-	if (sendExitMessage)
+	if (sendExitMessage && gIsConnectedToServer)
 	{
-		// TODO Send Exit Message
+		SendMessage(CSCA::SV_EXIT);
 	}
 
 	LeaveServer();
 	exit(0);
 }
 
+void ClientApp::DisplayOptions(bool setState /* = true */)
+{
+	if (gIsRegisteredWithServer)
+	{
+		std::cout
+			<< "\n          Select Action         \n"
+			<< "_________________________________\n"
+			<< "1) Set Username\n"
+			<< "2) Send Message\n"
+			<< "3) Get List of Users\n"
+			<< "4) Get Logs\n"
+			<< "5) Wait for Message\n"
+			<< "6) Exit\n";
+	}
+	else
+	{
+		std::cout
+			<< "\n          Select Action         \n"
+			<< "_________________________________\n"
+			<< "1) Set Username\n"
+			<< "2) Exit\n";
+	}
+
+	if (setState)
+		gClientState = QUERY_ACTION;
+}
+
 std::string ClientApp::QueryClientMessage()
 {
 	static const size_t MAX_MSG_SIZE = 1000;
-	char msgBuffer[MAX_MSG_SIZE];
+
 	bool messageAcquired = false;
+	std::string message;
 
 	do
 	{
 		std::cout
 			<< "\n\n>> Enter Message: ";
-		std::cin.getline(msgBuffer, MAX_MSG_SIZE);
+		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		std::getline(std::cin, message);
 
 		if (std::cin.fail())
 		{
@@ -294,7 +396,7 @@ std::string ClientApp::QueryClientMessage()
 		}
 	} while (!messageAcquired);
 
-	return std::string(msgBuffer);
+	return message;
 }
 
 std::string ClientApp::QueryUsername()
@@ -340,6 +442,8 @@ CSCA::SocketInfo ClientApp::QueryTCPSocketInfo()
 
 
 #pragma region Helper Functions
+
+
 bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest)
 {
 	int start = 0;

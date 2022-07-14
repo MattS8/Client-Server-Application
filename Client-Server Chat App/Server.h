@@ -41,6 +41,9 @@ private:
 		CSCA::ClientConnection* clientConnection,
 		std::string message);
 
+	bool HandleGetUserList(SOCKET socket,
+		CSCA::ClientConnection* clientConnection);
+
 	void RemoveClient(SOCKET clientSocket, 
 		CSCA::ClientConnection* clientConnection, bool logRemoval = true);
 
