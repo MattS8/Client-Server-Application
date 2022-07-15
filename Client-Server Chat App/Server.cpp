@@ -327,7 +327,7 @@ void ServerApp::AcceptNewClient()
 
 bool ServerApp::SendToAllClients(std::string message, std::string username)
 {
-	std::cout << "> Sending message from " << username << " to all clients!\n";
+	std::cout << "\n> Sending message from " << username << " to all clients!\n";
 
 	std::string realMessage = CSCA::SV_CLIENT_MESSAGE;
 	realMessage.append(" ");

@@ -186,6 +186,7 @@ bool ClientApp::HandleServerMessage()
 	}
 	else if (msgType.compare(CSCA::SV_REGISTER_SUCCESS) == 0)
 	{
+		gServerMessage.clientUsername = gSendMessage.clientUsername;
 		std::cout << "\n>> Registered as '" << gServerMessage.clientUsername << "'!\n";
 		gIsRegisteredWithServer = true;
 		return true;
@@ -273,6 +274,7 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 		{
 			std::cout << "\n> Message sent!\n";
 			delete[] gSendMessage.messageBuffer;
+			gSendMessage.messageBuffer = nullptr;
 			gSendMessage.messageSize = 0;
 			gSendMessage.clientUsername = CSCA::SEND_SIZE;
 			gSentSize = false;
@@ -285,6 +287,21 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 
 void ClientApp::SendMessage(std::string message)
 {
+	if (gSendMessage.messageBuffer != nullptr)
+	{
+		std::cout << "\n>> ERROR: Previous message to the server has not gone out yet!\n";
+		gClientState = QUERY_ACTION;
+		return;
+	}
+
+	gSendMessage.messageBuffer = new char[message.size()];
+	gSendMessage.messageSize = message.size();
+	memcpy(gSendMessage.messageBuffer, message.c_str(), message.size());
+	gSentSize = false;
+	return;
+
+	// BLOCKING IMPLEMENTATION
+
 	int result, bytesSent = 0;
 	size_t msgSize = message.size() + 1;
 
