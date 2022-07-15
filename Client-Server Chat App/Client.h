@@ -12,7 +12,7 @@
 class ClientApp
 {
 	enum ClientState { 
-		NONE, CONNECT_TO_SERVER, REGISTER_USERNAME, QUERY_ACTION, WAIT_FOR_MESSAGES, GETTING_CLIENT_LIST
+		NONE, CONNECT_TO_SERVER, REGISTER_USERNAME, QUERY_ACTION, WAIT_FOR_MESSAGES, GETTING_CLIENT_LIST, SENDING_MESSAGE, GETTING_LOGS
 	};
 
 	ClientState gClientState = NONE;
@@ -33,9 +33,9 @@ class ClientApp
 	};
 
 	CSCA::ClientConnection gServerMessage;
-	CSCA::ClientConnection gSendMessage;
 	bool gSentSize = false;
 	CSCA::SocketInfo QueryTCPSocketInfo();
+	std::string gClientMessages;
 
 	void DisplayOptions(bool bSetState = true);
 	void ConnectToServer();

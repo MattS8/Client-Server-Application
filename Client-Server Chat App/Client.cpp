@@ -52,10 +52,12 @@ void ClientApp::Run()
 		<< "                                                   \n";
 
 	ConnectToServer();
-	gSendMessage.messageBuffer = nullptr;
-	gSendMessage.messageSize = 0;
-	gSendMessage.bytesProcessed = 0;
-	gSendMessage.clientUsername = CSCA::SEND_SIZE;
+	gServerMessage.readMessageBuffer = nullptr;
+	gServerMessage.readBuffSize = 0;
+	gServerMessage.readBytesProcessed = 0;
+	gServerMessage.sendMessageBuffer = nullptr;
+	gServerMessage.sendBuffSize = 0;
+	gServerMessage.sendBytesProcessed = 0;
 	gClientState = QUERY_ACTION;
 	FD_SET(gComSocket, &gMasterSet);
 	while (true)
@@ -68,7 +70,7 @@ void ClientApp::Run()
 		int rc = select(0, &gReadReadySet, &gSendReadySet, NULL, &gTimeout);
 
 
-		if (gSendMessage.messageBuffer != nullptr)
+		if (gServerMessage.sendMessageBuffer != nullptr)
 		{
 			for (int i = 0; i < gSendReadySet.fd_count; i++)
 			{
@@ -82,6 +84,14 @@ void ClientApp::Run()
 				continue;
 		}
 
+		if (gClientState == WAIT_FOR_MESSAGES && gReadReadySet.fd_count == 0)
+		{
+			gClientMessages.append("\n_________________________________\n\n");
+			std::cout << gClientMessages;
+			gClientMessages.clear();
+			gClientState = QUERY_ACTION;
+		}
+
 		if (gClientState == QUERY_ACTION)
 		{
 			DisplayOptions();
@@ -92,6 +102,11 @@ void ClientApp::Run()
 
 void ClientApp::LeaveServer()
 {
+	if (gServerMessage.readMessageBuffer != nullptr)
+		delete[] gServerMessage.readMessageBuffer;
+	if (gServerMessage.sendMessageBuffer != nullptr)
+		delete[] gServerMessage.sendMessageBuffer;
+
 	FD_CLR(gComSocket, &gMasterSet);
 	closesocket(gComSocket);
 	gClientState = CONNECT_TO_SERVER;
@@ -101,9 +116,8 @@ void ClientApp::LeaveServer()
 
 bool ClientApp::ReceiveServerMessage(SOCKET socket)
 {
-
 	int result;
-	if (gServerMessage.messageSize == 0)
+	if (gServerMessage.readBuffSize == 0)
 	{
 		// Read in Size
 		char msgLength;
@@ -116,23 +130,23 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 			return false;
 		}
 
-		gServerMessage.messageSize = (uint8_t)msgLength;
+		gServerMessage.readBuffSize = (uint8_t)msgLength;
 
-		if (gServerMessage.messageSize < 1)
+		if (gServerMessage.readBuffSize < 1)
 		{
 			std::cerr << "\n>> ERROR: Invalid message size read in on socket "
-				<< socket << " (" << gServerMessage.messageSize << ")!\n";
+				<< socket << " (" << gServerMessage.readBuffSize << ")!\n";
 			LeaveServer();
 			return false;
 		}
-		gServerMessage.messageBuffer = new char[gServerMessage.messageSize + 1];
-		gServerMessage.bytesProcessed = 0;
+		gServerMessage.readMessageBuffer = new char[gServerMessage.readBuffSize + 1];
+		gServerMessage.readBytesProcessed = 0;
 	}
 	else
 	{
 		// Read in messages
-		result = recv(socket, gServerMessage.messageBuffer + gServerMessage.bytesProcessed,
-			gServerMessage.messageSize - gServerMessage.bytesProcessed, 0);
+		result = recv(socket, gServerMessage.readMessageBuffer + gServerMessage.readBytesProcessed,
+			gServerMessage.readBuffSize - gServerMessage.readBytesProcessed, 0);
 
 		if (result == 0)
 		{
@@ -147,19 +161,18 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 			return false;
 		}
 
-		gServerMessage.bytesProcessed += result;
+		gServerMessage.readBytesProcessed += result;
 
-		if (gServerMessage.bytesProcessed >= gServerMessage.messageSize)
+		if (gServerMessage.readBytesProcessed >= gServerMessage.readBuffSize)
 		{
-			gServerMessage.messageBuffer[gServerMessage.messageSize] = '\0';
+			gServerMessage.readMessageBuffer[gServerMessage.readBuffSize] = '\0';
 			// Handle full message received
 			if (HandleServerMessage())
 			{
-				delete[] gServerMessage.messageBuffer;
-				gServerMessage.messageBuffer = nullptr;
-				gServerMessage.messageSize = 0;
+				delete[] gServerMessage.readMessageBuffer;
+				gServerMessage.readMessageBuffer = nullptr;
+				gServerMessage.readBuffSize = 0;
 			}
-			gClientState = QUERY_ACTION;
 		}
 	}
 
@@ -168,7 +181,7 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 
 bool ClientApp::HandleServerMessage()
 {
-	std::string serverMessage(gServerMessage.messageBuffer);
+	std::string serverMessage(gServerMessage.readMessageBuffer);
 
 	std::string msgType = serverMessage.find(" ") == std::string::npos
 		? serverMessage
@@ -177,18 +190,20 @@ bool ClientApp::HandleServerMessage()
 	if (msgType.compare(CSCA::SV_FULL) == 0)
 	{
 		std::cout << "\n>> ERROR: Server is full!\n";
+		gClientState = CONNECT_TO_SERVER;
 		return true;
 	}
 	else if (msgType.compare(CSCA::SV_USERNAME_TAKEN) == 0)
 	{
 		std::cout << "\n>> ERROR: Username already taken!\n";
+		gClientState = QUERY_ACTION;
 		return true;
 	}
 	else if (msgType.compare(CSCA::SV_REGISTER_SUCCESS) == 0)
 	{
-		gServerMessage.clientUsername = gSendMessage.clientUsername;
 		std::cout << "\n>> Registered as '" << gServerMessage.clientUsername << "'!\n";
 		gIsRegisteredWithServer = true;
+		gClientState = QUERY_ACTION;
 		return true;
 	}
 	else if (msgType.compare(CSCA::SV_CLIENT_LIST) == 0)
@@ -210,19 +225,20 @@ bool ClientApp::HandleServerMessage()
 			userList = userList.substr(endPos + 1);
 		}
 		std::cout << "_________________________________\n";
+		gClientState = QUERY_ACTION;
 		return true;
 	}
 	else if (msgType.compare(CSCA::SV_CLIENT_MESSAGE) == 0)
 	{
-		std::cout << "\n> "
-			<< serverMessage.substr(serverMessage.find(" ")+1)
-			<< "\n_________________________________\n\n";
+		gClientMessages.append("\n> ");
+		gClientMessages.append(serverMessage.substr(serverMessage.find(" ") + 1));
 		return true;
 	}
 	else
 	{
 		std::cout << "\n>> ERROR: Received unknown message type from server: "
 			<< msgType << "!\n";
+		gClientState = QUERY_ACTION;
 		return true;
 	}
 }
@@ -234,7 +250,7 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 	if (!gSentSize)
 	{
 		// Send Size
-		size_t msgSize = gSendMessage.messageSize;
+		size_t msgSize = gServerMessage.sendBuffSize;
 		result = send(gComSocket, (const char*)&msgSize, 1, 0);
 		if (result == 0)
 		{
@@ -251,15 +267,15 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 		else
 		{
 			gSentSize = true;
-			gSendMessage.bytesProcessed = 0;
+			gServerMessage.sendBytesProcessed = 0;
 			return true;
 		}
 	}
 	else
 	{
 		// Send Message
-		result = send(gComSocket, (const char*)gSendMessage.messageBuffer + gSendMessage.bytesProcessed,
-			gSendMessage.messageSize - gSendMessage.bytesProcessed, 0);
+		result = send(gComSocket, (const char*)gServerMessage.sendMessageBuffer + gServerMessage.sendBytesProcessed,
+			gServerMessage.sendBuffSize - gServerMessage.sendBytesProcessed, 0);
 		if (result < 0)
 		{
 			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
@@ -268,16 +284,18 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 			Exit(false);
 			return false;
 		}
-		gSendMessage.bytesProcessed += result;
+		gServerMessage.sendBytesProcessed += result;
 
-		if (gSendMessage.bytesProcessed == gSendMessage.messageSize)
+		if (gServerMessage.sendBytesProcessed == gServerMessage.sendBuffSize)
 		{
-			std::cout << "\n> Message sent!\n";
-			delete[] gSendMessage.messageBuffer;
-			gSendMessage.messageBuffer = nullptr;
-			gSendMessage.messageSize = 0;
-			gSendMessage.clientUsername = CSCA::SEND_SIZE;
+			//std::cout << "\n> Message sent!\n";
+			delete[] gServerMessage.sendMessageBuffer;
+			gServerMessage.sendMessageBuffer = nullptr;
+			gServerMessage.sendBuffSize = 0;
 			gSentSize = false;
+			if (gClientState == SENDING_MESSAGE)
+				gClientState = QUERY_ACTION;
+
 			return true;
 		}
 
@@ -287,16 +305,16 @@ bool ClientApp::SendClientMessage(SOCKET socket)
 
 void ClientApp::SendMessage(std::string message)
 {
-	if (gSendMessage.messageBuffer != nullptr)
+	if (gServerMessage.sendMessageBuffer != nullptr)
 	{
 		std::cout << "\n>> ERROR: Previous message to the server has not gone out yet!\n";
 		gClientState = QUERY_ACTION;
 		return;
 	}
 
-	gSendMessage.messageBuffer = new char[message.size()];
-	gSendMessage.messageSize = message.size();
-	memcpy(gSendMessage.messageBuffer, message.c_str(), message.size());
+	gServerMessage.sendMessageBuffer = new char[message.size()];
+	gServerMessage.sendBuffSize = message.size();
+	memcpy(gServerMessage.sendMessageBuffer, message.c_str(), message.size());
 	gSentSize = false;
 	return;
 
@@ -342,7 +360,7 @@ void ClientApp::SendMessage(std::string message)
 
 void ClientApp::RegisterClient(std::string username)
 {
-	gSendMessage.clientUsername = username;
+	gServerMessage.clientUsername = username;
 	std::string registerMsg = CSCA::SV_REGISTER_USERNAME;
 	registerMsg.append(" ");
 	SendMessage(registerMsg.append(username));
@@ -350,6 +368,11 @@ void ClientApp::RegisterClient(std::string username)
 
 void ClientApp::Exit(bool sendExitMessage /* = true */)
 {
+	if (gServerMessage.readMessageBuffer != nullptr)
+		delete[] gServerMessage.readMessageBuffer;
+	if (gServerMessage.sendMessageBuffer != nullptr)
+		delete[] gServerMessage.sendMessageBuffer;
+
 	if (sendExitMessage && gIsConnectedToServer)
 	{
 		SendMessage(CSCA::SV_EXIT);
@@ -371,9 +394,9 @@ void ClientApp::DisplayOptions(bool setState /* = true */)
 			<< "_________________________________\n"
 			<< "1) Set Username\n"
 			<< "2) Send Message\n"
-			<< "3) Get List of Users\n"
-			<< "4) Get Logs\n"
-			<< "5) Wait for Message\n"
+			<< "3) Check for Messages\n"
+			<< "4) Get List of Users\n"
+			<< "5) Get Logs\n"
 			<< "6) Exit\n";
 	}
 	else
@@ -413,8 +436,9 @@ void ClientApp::QueryUserAction()
 	case 2:
 		if (gIsRegisteredWithServer)
 		{
-
 			SendMessage(QueryClientMessage());
+			gClientState = SENDING_MESSAGE;
+			return;
 		}
 		else
 		{
@@ -423,16 +447,27 @@ void ClientApp::QueryUserAction()
 		}
 		break;
 	case 3:
-
+		if (gClientMessages.size() > 0)
+		{
+			std::string temp(gClientMessages.c_str());
+			gClientMessages = "\n       Unread Messages:        \n";
+			gClientMessages.append("_________________________________\n");
+			gClientMessages.append(temp);
+		}
+		else
+		{
+			gClientMessages = "\n       Unread Messages:        \n";
+			gClientMessages.append("_________________________________\n");
+		}
+		gClientState = WAIT_FOR_MESSAGES;
+		return;
+	case 4:
 		SendMessage(CSCA::SV_GET_CLIENT_LIST);
 		gClientState = GETTING_CLIENT_LIST;
 		return;
 	case 5:
-		std::cout
-			<< "\n   Listening For Message...    \n"
-			<< "_________________________________\n";
-		gClientState = WAIT_FOR_MESSAGES;
-		return;
+		SendMessage(CSCA::SV_GET_LOGS);
+		gClientState = GETTING_LOGS;
 	case 6:
 		Exit();
 		return;
