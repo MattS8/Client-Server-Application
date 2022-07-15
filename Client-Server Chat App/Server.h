@@ -18,13 +18,16 @@ private:
 	SOCKET gListenSocket;
 	fd_set gMasterSet;
 	fd_set gReadReadySet;
+	fd_set gSendReadySet;
 	timeval gTimeout = {
-		1,	// Seconds
-		0	// Microseconds
+		0,	// Seconds
+		500	// Microseconds
 	};
 
 	std::map<SOCKET, CSCA::ClientConnection*> gConnectedUsers;
 	std::map<std::string, SOCKET> gUsernames;
+
+	double GetDeltaTime();
 
 	/** Displays '.' update to console upon select timeout. */
 	void ShowListeningStatus();
@@ -56,6 +59,9 @@ private:
 	void LogExit(CSCA::ClientConnection* clientConnection);
 
 	bool SendToAllClients(std::string message, std::string username);
+
+	void SendBytesToClient(SOCKET socket,
+		CSCA::ClientConnection* clientConnection);
 
 	void SendClientMessage(SOCKET socket, 
 		CSCA::ClientConnection* clientConnection, std::string message);

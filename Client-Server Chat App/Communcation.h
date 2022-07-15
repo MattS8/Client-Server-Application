@@ -10,11 +10,8 @@ namespace CSCA
 	const std::string SV_CLIENT_MESSAGE = "SV_CLIENT_MESSAGE";
 	const std::string SV_FULL = "SV_FULL";
 	const std::string SV_CLIENT_LIST = "SV_CLIENT_LIST";
+	const std::string SV_GET_LOGS = "SV_GET_LOGS";
 	const std::string SV_EXIT = "SV_EXIT";
-
-
-	const std::string SEND_SIZE = "SEND_SIZE";
-	const std::string SEND_MESSAGE = "SEND_MESSAGE";
 
 	struct SocketInfo
 	{
@@ -26,8 +23,13 @@ namespace CSCA
 	struct ClientConnection
 	{
 		std::string clientUsername;
-		char* messageBuffer;
-		uint8_t messageSize;
-		uint8_t bytesProcessed;
+		char* readMessageBuffer;
+		uint8_t readBuffSize;
+		uint8_t readBytesProcessed;
+
+		char* sendMessageBuffer;
+		uint8_t sendBuffSize;
+		uint8_t sendBytesProcessed;
+		bool sendSizeSent;
 	};
 }

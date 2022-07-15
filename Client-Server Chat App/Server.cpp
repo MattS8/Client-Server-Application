@@ -2,10 +2,25 @@
 #include "Server.h"
 #include <iostream>
 
+#include <chrono>
+
 // Text Art Generated at https://patorjk.com/
+
+double ServerApp::GetDeltaTime()
+{
+	static std::chrono::time_point<std::chrono::high_resolution_clock> last_time = std::chrono::high_resolution_clock::now();
+
+	std::chrono::time_point<std::chrono::high_resolution_clock> new_time = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> elapsed_seconds = new_time - last_time;
+	last_time = new_time;
+
+	return std::min(1.0 / 15.0, elapsed_seconds.count());
+}
 
 void ServerApp::Run()
 {
+	static float timeoutDelay = 0;
+	static float MaxTimeout = 1;
 	std::cout
 		<< "____ ____ ____ _  _ ____ ____    _  _ ____ ___  ____   \n"
 		<< "[__  |___ |__/ |  | |___ |__/    |\\/| |  | |  \\ |___ . \n"
@@ -25,7 +40,6 @@ void ServerApp::Run()
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_addr.S_un.S_addr = INADDR_ANY;
 	serverAddr.sin_port = htons(31337);
-
 	int result = bind(gListenSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr));
 	if (result == SOCKET_ERROR)
 	{
@@ -50,10 +64,37 @@ void ServerApp::Run()
 	do 
 	{
 		gReadReadySet = gMasterSet;
-		int rc = select(0, &gReadReadySet, NULL, NULL, &gTimeout);
+		gSendReadySet = gMasterSet;
+		int rc = select(0, &gReadReadySet, &gSendReadySet, NULL, &gTimeout);
+		bool dataSentToClient = false;
+		// Check to send messages out
+		for (int i = 0; i < gSendReadySet.fd_count; i++)
+		{
+			CSCA::ClientConnection* cc = gConnectedUsers[gSendReadySet.fd_array[i]];
+			if (cc != nullptr && cc->sendMessageBuffer != nullptr)
+			{
+				SendBytesToClient(gSendReadySet.fd_array[i], cc);
+				dataSentToClient = true;
+			}
+		}
 
+		// Check listen socket
+		if (FD_ISSET(gListenSocket, &gReadReadySet))
+		{
+			AcceptNewClient();
+		}
+
+		// Check for client messages
+		for (int i = 0; i < gReadReadySet.fd_count; i++)
+		{
+			if (gReadReadySet.fd_array[i] == gListenSocket)
+				continue;
+			ReceiveClientMessage(gReadReadySet.fd_array[i]);
+		}
+
+		timeoutDelay += GetDeltaTime();
 		// Timeout
-		if (rc == 0)
+		if (gReadReadySet.fd_count == 0 && !dataSentToClient && timeoutDelay > MaxTimeout)
 		{
 			if (gShowListeningStatus)
 				ShowListeningStatus();
@@ -68,22 +109,7 @@ void ServerApp::Run()
 				std::cout << ".";
 			}
 			++dotCount;
-			continue;
-		}
-
-		// Check listen socket
-		if (FD_ISSET(gListenSocket, &gReadReadySet))
-		{
-			AcceptNewClient();
-		}
-
-		// Check client communication
-
-		for (int i = 0; i < gReadReadySet.fd_count; i++)
-		{
-			if (gReadReadySet.fd_array[i] == gListenSocket)
-				continue;
-			ReceiveClientMessage(gReadReadySet.fd_array[i]);
+			timeoutDelay = 0;
 		}
 	} while (true);
 
@@ -104,7 +130,7 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 	CSCA::ClientConnection* connection = itConnection->second;
 
 	int result;
-	if (connection->messageSize == 0)
+	if (connection->readBuffSize == 0)
 	{
 		// Read in Size
 		char msgLength;
@@ -118,24 +144,24 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 			return;
 		}
 
-		connection->messageSize = (uint8_t)msgLength;
+		connection->readBuffSize = (uint8_t)msgLength;
 
-		if (connection->messageSize < 1)
+		if (connection->readBuffSize < 1)
 		{
 			std::cerr << "\n>> ERROR: Invalid message size read in on socket "
-				<< socket << " (" << connection->messageSize << ")!\n";
+				<< socket << " (" << connection->readBuffSize << ")!\n";
 			gShowListeningStatus = true;;
 			RemoveClient(socket, connection);
 			return;
 		}
-		connection->messageBuffer = new char[connection->messageSize + 1];
-		connection->bytesProcessed = 0;
+		connection->readMessageBuffer = new char[connection->readBuffSize + 1];
+		connection->readBytesProcessed = 0;
 	}
 	else
 	{
 		// Read in messages
-		result = recv(socket, connection->messageBuffer + connection->bytesProcessed,
-			connection->messageSize - connection->bytesProcessed, 0);
+		result = recv(socket, connection->readMessageBuffer + connection->readBytesProcessed,
+			connection->readBuffSize - connection->readBytesProcessed, 0);
 	
 		if (result == 0)
 		{
@@ -151,17 +177,17 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 			return;
 		}
 
-		connection->bytesProcessed += result;
+		connection->readBytesProcessed += result;
 
-		if (connection->bytesProcessed >= connection->messageSize)
+		if (connection->readBytesProcessed >= connection->readBuffSize)
 		{
-			connection->messageBuffer[connection->messageSize] = '\0';
+			connection->readMessageBuffer[connection->readBuffSize] = '\0';
 			// Handle full message received
 			if (HandleClientMessage(socket, connection))
 			{
-				delete[] connection->messageBuffer;
-				connection->messageBuffer = nullptr;
-				connection->messageSize = 0;
+				delete[] connection->readMessageBuffer;
+				connection->readMessageBuffer = nullptr;
+				connection->readBuffSize = 0;
 			}
 		}
 	}
@@ -247,12 +273,14 @@ bool ServerApp::HandleGetUserList(SOCKET socket, CSCA::ClientConnection* clientC
 
 	std::cout << "\n> User '" << clientConnection->clientUsername << "' requested user list!\n";
 
+	gShowListeningStatus = true;
+
 	return true;
 }
 
 bool ServerApp::HandleClientMessage(SOCKET socket, CSCA::ClientConnection* clientConnection)
 {
-	std::string message(clientConnection->messageBuffer);
+	std::string message(clientConnection->readMessageBuffer);
 	// Handle Commands
 	if (message[0] == '$')
 	{
@@ -309,10 +337,14 @@ void ServerApp::AcceptNewClient()
 		if (gConnectedUsers.find(commSocket) == gConnectedUsers.end())
 		{
 			CSCA::ClientConnection* newClientConnection = new CSCA::ClientConnection;
-			newClientConnection->bytesProcessed = 0;
-			newClientConnection->messageBuffer = nullptr;
-			newClientConnection->messageSize = 0;
+			newClientConnection->readBytesProcessed = 0;
+			newClientConnection->readMessageBuffer = nullptr;
+			newClientConnection->readBuffSize = 0;
 			newClientConnection->clientUsername = "";
+			newClientConnection->sendBytesProcessed = 0;
+			newClientConnection->sendMessageBuffer = nullptr;
+			newClientConnection->sendBuffSize = 0;
+			newClientConnection->sendSizeSent = false;
 			gConnectedUsers.insert(std::pair<SOCKET, CSCA::ClientConnection*>(
 				commSocket,
 				newClientConnection));
@@ -341,12 +373,79 @@ bool ServerApp::SendToAllClients(std::string message, std::string username)
 			SendClientMessage(it->first, it->second, realMessage);
 	}
 
+	gShowListeningStatus = true;
 	return true;
+}
+
+void ServerApp::SendBytesToClient(SOCKET socket, CSCA::ClientConnection* clientConnection)
+{
+	int result;
+	if (!clientConnection->sendSizeSent)
+	{
+		// Send message size
+		result = send(socket, (const char*)&clientConnection->sendBuffSize, 1, 0);
+		if (result == 0)
+		{
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+		if (result == SOCKET_ERROR)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< socket << " (SOCKET_ERROR)!\n";
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+
+		clientConnection->sendSizeSent = true;
+	}
+	else
+	{
+		// Send message
+		result = send(socket, (const char*)clientConnection->sendMessageBuffer + clientConnection->sendBytesProcessed,
+			clientConnection->sendBuffSize - clientConnection->sendBytesProcessed, 0);
+		if (result < 0)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< socket << " (SOCKET_ERROR)!\n";
+			RemoveClient(socket, clientConnection);
+			return;
+		}
+		clientConnection->sendBytesProcessed += result;
+
+		// Remove message buffer on complete
+		if (clientConnection->sendBytesProcessed == clientConnection->sendBuffSize)
+		{
+			delete[] clientConnection->sendMessageBuffer;
+			clientConnection->sendMessageBuffer = nullptr;
+			clientConnection->sendBuffSize = 0;
+			clientConnection->sendBytesProcessed = 0;
+			clientConnection->sendSizeSent = false;
+		}
+	}
 }
 
 void ServerApp::SendClientMessage(SOCKET socket, 
 	CSCA::ClientConnection* clientConnection, std::string message)
 {
+	if (clientConnection->sendMessageBuffer != nullptr)
+	{
+		std::cout << "\n>> ERROR: tried sending new message to "
+			<< clientConnection->clientUsername
+			<< " however a message is currently being sent!\n\t"
+			<< "The following message will be dropped: '"
+			<< message << "'\n";
+		return;
+	}
+
+	clientConnection->sendBuffSize = message.size();
+	clientConnection->sendMessageBuffer = new char[clientConnection->sendBuffSize];
+	clientConnection->sendBytesProcessed = 0;
+	memcpy(clientConnection->sendMessageBuffer, message.c_str(), message.size());
+	clientConnection->sendSizeSent = false;
+	return;
+	// OLD Implementation
+
 	int result, bytesSent = 0;
 	size_t msgSize = message.size();
 
@@ -399,8 +498,10 @@ void ServerApp::RemoveClient(SOCKET clientSocket,
 	{
 		std::cout << "\n> " << clientConnection->clientUsername << " disconnected from the server!\n";
 		gUsernames.erase(clientConnection->clientUsername);
-		if (clientConnection->messageBuffer != nullptr)
-			delete[] clientConnection->messageBuffer;
+		if (clientConnection->readMessageBuffer != nullptr)
+			delete[] clientConnection->readMessageBuffer;
+		if (clientConnection->sendMessageBuffer != nullptr)
+			delete[] clientConnection->sendMessageBuffer;
 		delete clientConnection;
 	}
 
