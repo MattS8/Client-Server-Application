@@ -12,6 +12,10 @@ namespace CSCA
 	const std::string SV_CLIENT_LIST = "SV_CLIENT_LIST";
 	const std::string SV_EXIT = "SV_EXIT";
 
+
+	const std::string SEND_SIZE = "SEND_SIZE";
+	const std::string SEND_MESSAGE = "SEND_MESSAGE";
+
 	struct SocketInfo
 	{
 		unsigned short ipAddr[4];
@@ -24,6 +28,6 @@ namespace CSCA
 		std::string clientUsername;
 		char* messageBuffer;
 		uint8_t messageSize;
-		uint8_t bytesRead;
+		uint8_t bytesProcessed;
 	};
 }

@@ -43,14 +43,14 @@ void ServerApp::Run()
 
 	// Prepare sets
 	FD_ZERO(&gMasterSet);
-	FD_ZERO(&gReadySet);
+	FD_ZERO(&gReadReadySet);
 	FD_SET(gListenSocket, &gMasterSet);
 
 	// Select statement
 	do 
 	{
-		gReadySet = gMasterSet;
-		int rc = select(0, &gReadySet, NULL, NULL, &gTimeout);
+		gReadReadySet = gMasterSet;
+		int rc = select(0, &gReadReadySet, NULL, NULL, &gTimeout);
 
 		// Timeout
 		if (rc == 0)
@@ -72,18 +72,18 @@ void ServerApp::Run()
 		}
 
 		// Check listen socket
-		if (FD_ISSET(gListenSocket, &gReadySet))
+		if (FD_ISSET(gListenSocket, &gReadReadySet))
 		{
 			AcceptNewClient();
 		}
 
 		// Check client communication
 
-		for (int i = 0; i < gReadySet.fd_count; i++)
+		for (int i = 0; i < gReadReadySet.fd_count; i++)
 		{
-			if (gReadySet.fd_array[i] == gListenSocket)
+			if (gReadReadySet.fd_array[i] == gListenSocket)
 				continue;
-			ReceiveClientMessage(gReadySet.fd_array[i]);
+			ReceiveClientMessage(gReadReadySet.fd_array[i]);
 		}
 	} while (true);
 
@@ -129,13 +129,13 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 			return;
 		}
 		connection->messageBuffer = new char[connection->messageSize + 1];
-		connection->bytesRead = 0;
+		connection->bytesProcessed = 0;
 	}
 	else
 	{
 		// Read in messages
-		result = recv(socket, connection->messageBuffer + connection->bytesRead,
-			connection->messageSize - connection->bytesRead, 0);
+		result = recv(socket, connection->messageBuffer + connection->bytesProcessed,
+			connection->messageSize - connection->bytesProcessed, 0);
 	
 		if (result == 0)
 		{
@@ -151,9 +151,9 @@ void ServerApp::ReceiveClientMessage(SOCKET socket)
 			return;
 		}
 
-		connection->bytesRead += result;
+		connection->bytesProcessed += result;
 
-		if (connection->bytesRead >= connection->messageSize)
+		if (connection->bytesProcessed >= connection->messageSize)
 		{
 			connection->messageBuffer[connection->messageSize] = '\0';
 			// Handle full message received
@@ -309,7 +309,7 @@ void ServerApp::AcceptNewClient()
 		if (gConnectedUsers.find(commSocket) == gConnectedUsers.end())
 		{
 			CSCA::ClientConnection* newClientConnection = new CSCA::ClientConnection;
-			newClientConnection->bytesRead = 0;
+			newClientConnection->bytesProcessed = 0;
 			newClientConnection->messageBuffer = nullptr;
 			newClientConnection->messageSize = 0;
 			newClientConnection->clientUsername = "";

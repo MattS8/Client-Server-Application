@@ -17,7 +17,7 @@ private:
 
 	SOCKET gListenSocket;
 	fd_set gMasterSet;
-	fd_set gReadySet;
+	fd_set gReadReadySet;
 	timeval gTimeout = {
 		1,	// Seconds
 		0	// Microseconds

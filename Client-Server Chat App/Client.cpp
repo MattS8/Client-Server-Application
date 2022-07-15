@@ -52,7 +52,10 @@ void ClientApp::Run()
 		<< "                                                   \n";
 
 	ConnectToServer();
-
+	gSendMessage.messageBuffer = nullptr;
+	gSendMessage.messageSize = 0;
+	gSendMessage.bytesProcessed = 0;
+	gSendMessage.clientUsername = CSCA::SEND_SIZE;
 	gClientState = QUERY_ACTION;
 	FD_SET(gComSocket, &gMasterSet);
 	while (true)
@@ -60,12 +63,22 @@ void ClientApp::Run()
 		if (gClientState == CONNECT_TO_SERVER)
 			ConnectToServer();
 
-		gReadySet = gMasterSet;
-		int rc = select(0, &gReadySet, NULL, NULL, &gTimeout);
+		gReadReadySet = gMasterSet;
+		gSendReadySet = gMasterSet;
+		int rc = select(0, &gReadReadySet, &gSendReadySet, NULL, &gTimeout);
 
-		for (int i = 0; i < gReadySet.fd_count; i++)
+
+		if (gSendMessage.messageBuffer != nullptr)
 		{
-			if (!ReceiveServerMessage(gReadySet.fd_array[i]))
+			for (int i = 0; i < gSendReadySet.fd_count; i++)
+			{
+				SendClientMessage(gSendReadySet.fd_array[i]);
+			}
+		}
+
+		for (int i = 0; i < gReadReadySet.fd_count; i++)
+		{
+			if (!ReceiveServerMessage(gReadReadySet.fd_array[i]))
 				continue;
 		}
 
@@ -113,13 +126,13 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 			return false;
 		}
 		gServerMessage.messageBuffer = new char[gServerMessage.messageSize + 1];
-		gServerMessage.bytesRead = 0;
+		gServerMessage.bytesProcessed = 0;
 	}
 	else
 	{
 		// Read in messages
-		result = recv(socket, gServerMessage.messageBuffer + gServerMessage.bytesRead,
-			gServerMessage.messageSize - gServerMessage.bytesRead, 0);
+		result = recv(socket, gServerMessage.messageBuffer + gServerMessage.bytesProcessed,
+			gServerMessage.messageSize - gServerMessage.bytesProcessed, 0);
 
 		if (result == 0)
 		{
@@ -134,9 +147,9 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 			return false;
 		}
 
-		gServerMessage.bytesRead += result;
+		gServerMessage.bytesProcessed += result;
 
-		if (gServerMessage.bytesRead >= gServerMessage.messageSize)
+		if (gServerMessage.bytesProcessed >= gServerMessage.messageSize)
 		{
 			gServerMessage.messageBuffer[gServerMessage.messageSize] = '\0';
 			// Handle full message received
@@ -213,75 +226,61 @@ bool ClientApp::HandleServerMessage()
 	}
 }
 
-static std::string getChoice()
+bool ClientApp::SendClientMessage(SOCKET socket)
 {
-	int choice;
-	std::cin >> choice;
-	return std::to_string(choice);
-}
+	int result;
 
-bool ClientApp::WithinRange(int choice)
-{
-	if (gIsRegisteredWithServer)
-		return choice >= 1 && choice <= 6;
-	else
-		return choice >= 1 && choice <= 2;
-}
-
-void ClientApp::QueryUserAction()
-{
-	int choice = -1;
-	do
+	if (!gSentSize)
 	{
-		std::cin >> choice;
-		if (std::cin.fail())
+		// Send Size
+		size_t msgSize = gSendMessage.messageSize;
+		result = send(gComSocket, (const char*)&msgSize, 1, 0);
+		if (result == 0)
 		{
-			std::cin.clear();
-			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+			Exit(false);
+			return false;
 		}
-
-	} while (!WithinRange(choice));
-
-	switch (choice)
-	{
-	case 1:
-		RegisterClient(QueryUsername());
-		gClientState = REGISTER_USERNAME;
-		return;
-	case 2:
-		if (gIsRegisteredWithServer)
+		if (result == SOCKET_ERROR)
 		{
-			SendMessage(QueryClientMessage());
+			std::cerr << "\n>> ERROR: Unable to send message to server on socket "
+				<< gComSocket << " (SOCKET_ERROR)!\n";
+			Exit(false);
+			return false;
 		}
 		else
 		{
-			Exit();
-			return;
+			gSentSize = true;
+			gSendMessage.bytesProcessed = 0;
+			return true;
 		}
-		break;
-	case 3:
-		SendMessage(CSCA::SV_GET_CLIENT_LIST);
-		gClientState = GETTING_CLIENT_LIST;
-		return;
-	case 5:
-		WaitForMessages();
-		return;
-	case 6:
-		Exit();
-		return;
-	default:
-		break;
 	}
+	else
+	{
+		// Send Message
+		result = send(gComSocket, (const char*)gSendMessage.messageBuffer + gSendMessage.bytesProcessed,
+			gSendMessage.messageSize - gSendMessage.bytesProcessed, 0);
+		if (result < 0)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< gComSocket << " (SOCKET_ERROR)!\n";
+			gSentSize = false;
+			Exit(false);
+			return false;
+		}
+		gSendMessage.bytesProcessed += result;
 
-	gClientState = QUERY_ACTION;
-}
+		if (gSendMessage.bytesProcessed == gSendMessage.messageSize)
+		{
+			std::cout << "\n> Message sent!\n";
+			delete[] gSendMessage.messageBuffer;
+			gSendMessage.messageSize = 0;
+			gSendMessage.clientUsername = CSCA::SEND_SIZE;
+			gSentSize = false;
+			return true;
+		}
 
-void ClientApp::WaitForMessages()
-{
-	gClientState = WAIT_FOR_MESSAGES;
-	std::cout
-		<< "\n   Listening For Message...    \n"
-		<< "_________________________________\n";
+		return false;
+	}
 }
 
 void ClientApp::SendMessage(std::string message)
@@ -300,7 +299,7 @@ void ClientApp::SendMessage(std::string message)
 		}
 		if (result == SOCKET_ERROR)
 		{
-			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+			std::cerr << "\n>> ERROR: Unable to send message to server on socket "
 				<< gComSocket<< " (SOCKET_ERROR)!\n";
 			Exit(false);
 			return;
@@ -326,7 +325,7 @@ void ClientApp::SendMessage(std::string message)
 
 void ClientApp::RegisterClient(std::string username)
 {
-	gServerMessage.clientUsername = username;
+	gSendMessage.clientUsername = username;
 	std::string registerMsg = CSCA::SV_REGISTER_USERNAME;
 	registerMsg.append(" ");
 	SendMessage(registerMsg.append(username));
@@ -338,6 +337,9 @@ void ClientApp::Exit(bool sendExitMessage /* = true */)
 	{
 		SendMessage(CSCA::SV_EXIT);
 	}
+	std::cout << "\n\n> Press ENTER to exit.\n";
+	std::cin.ignore();
+	std::cin.get();
 
 	LeaveServer();
 	exit(0);
@@ -368,6 +370,60 @@ void ClientApp::DisplayOptions(bool setState /* = true */)
 
 	if (setState)
 		gClientState = QUERY_ACTION;
+}
+
+#pragma region Query Functions
+void ClientApp::QueryUserAction()
+{
+	int choice = -1;
+	do
+	{
+		std::cin >> choice;
+		if (std::cin.fail())
+		{
+			std::cin.clear();
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
+
+	} while (!WithinRange(choice));
+
+	switch (choice)
+	{
+	case 1:
+		RegisterClient(QueryUsername());
+		gClientState = REGISTER_USERNAME;
+		return;
+	case 2:
+		if (gIsRegisteredWithServer)
+		{
+
+			SendMessage(QueryClientMessage());
+		}
+		else
+		{
+			Exit();
+			return;
+		}
+		break;
+	case 3:
+
+		SendMessage(CSCA::SV_GET_CLIENT_LIST);
+		gClientState = GETTING_CLIENT_LIST;
+		return;
+	case 5:
+		std::cout
+			<< "\n   Listening For Message...    \n"
+			<< "_________________________________\n";
+		gClientState = WAIT_FOR_MESSAGES;
+		return;
+	case 6:
+		Exit();
+		return;
+	default:
+		break;
+	}
+
+	gClientState = QUERY_ACTION;
 }
 
 std::string ClientApp::QueryClientMessage()
@@ -403,7 +459,7 @@ std::string ClientApp::QueryUsername()
 {
 	std::string username;
 	std::cout
-		<< "\n\n>> Set Username: "; 
+		<< "\n\n>> Set Username: ";
 	std::cin >> username;
 	if (std::cin.fail())
 	{
@@ -439,10 +495,16 @@ CSCA::SocketInfo ClientApp::QueryTCPSocketInfo()
 
 	return socketInfo;
 }
-
+#pragma endregion
 
 #pragma region Helper Functions
-
+bool ClientApp::WithinRange(int choice)
+{
+	if (gIsRegisteredWithServer)
+		return choice >= 1 && choice <= 6;
+	else
+		return choice >= 1 && choice <= 2;
+}
 
 bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest)
 {

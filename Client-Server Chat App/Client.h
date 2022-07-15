@@ -34,6 +34,7 @@ class ClientApp
 
 	CSCA::ClientConnection gServerMessage;
 	CSCA::ClientConnection gSendMessage;
+	bool gSentSize = false;
 	CSCA::SocketInfo QueryTCPSocketInfo();
 
 	void DisplayOptions(bool bSetState = true);
@@ -46,11 +47,11 @@ public:
 
 	void SendMessage(std::string message);
 
+	bool SendClientMessage(SOCKET socket);
+
 	bool ReceiveServerMessage(SOCKET socket);
 
 	bool HandleServerMessage();
-
-	void WaitForMessages();
 
 	void Exit(bool sendExitMessage = true);
 
