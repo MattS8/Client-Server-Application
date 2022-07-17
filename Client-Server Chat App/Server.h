@@ -11,9 +11,10 @@
 class ServerApp
 {
 private:
+	std::string LOG_FILENAME = "serverlog.log";
 	bool gShowListeningStatus = true;
 
-	const uint8_t MaxServerCapacity = 10;
+	int MaxServerCapacity = 10;
 
 	SOCKET gListenSocket;
 	fd_set gMasterSet;
@@ -45,6 +46,9 @@ private:
 		std::string message);
 
 	bool HandleGetUserList(SOCKET socket,
+		CSCA::ClientConnection* clientConnection);
+
+	bool HandleGetLog(SOCKET socket,
 		CSCA::ClientConnection* clientConnection);
 
 	void RemoveClient(SOCKET clientSocket, 

@@ -1,5 +1,9 @@
+#define _CRT_SECURE_NO_DEPRECATE
 #include "Client.h"
 #include <stdio.h>
+
+#include <fstream>
+#include <sstream>
 
 #pragma region Forward Declarations
 bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
@@ -62,9 +66,6 @@ void ClientApp::Run()
 	FD_SET(gComSocket, &gMasterSet);
 	while (true)
 	{
-		if (gClientState == CONNECT_TO_SERVER)
-			ConnectToServer();
-
 		gReadReadySet = gMasterSet;
 		gSendReadySet = gMasterSet;
 		int rc = select(0, &gReadReadySet, &gSendReadySet, NULL, &gTimeout);
@@ -109,7 +110,6 @@ void ClientApp::LeaveServer()
 
 	FD_CLR(gComSocket, &gMasterSet);
 	closesocket(gComSocket);
-	gClientState = CONNECT_TO_SERVER;
 	gIsConnectedToServer = false;
 	gIsRegisteredWithServer = false;
 }
@@ -126,7 +126,7 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 		{
 			std::cerr << "\n>> ERROR: Unable to read message length for socket "
 				<< socket << "!\n";
-			LeaveServer();
+			Exit(false);
 			return false;
 		}
 
@@ -136,7 +136,7 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 		{
 			std::cerr << "\n>> ERROR: Invalid message size read in on socket "
 				<< socket << " (" << gServerMessage.readBuffSize << ")!\n";
-			LeaveServer();
+			Exit(false);
 			return false;
 		}
 		gServerMessage.readMessageBuffer = new char[gServerMessage.readBuffSize + 1];
@@ -150,14 +150,14 @@ bool ClientApp::ReceiveServerMessage(SOCKET socket)
 
 		if (result == 0)
 		{
-			LeaveServer();
+			Exit(false);
 			return false;
 		}
 		if (result == SOCKET_ERROR)
 		{
 			std::cerr << "\n>> ERROR: Unable to read client message on socket "
 				<< socket << " (SOCKET_ERROR)!\n";
-			LeaveServer();
+			Exit(false);
 			return false;
 		}
 
@@ -190,7 +190,7 @@ bool ClientApp::HandleServerMessage()
 	if (msgType.compare(CSCA::SV_FULL) == 0)
 	{
 		std::cout << "\n>> ERROR: Server is full!\n";
-		gClientState = CONNECT_TO_SERVER;
+		gClientState = QUERY_ACTION;
 		return true;
 	}
 	else if (msgType.compare(CSCA::SV_USERNAME_TAKEN) == 0)
@@ -225,6 +225,24 @@ bool ClientApp::HandleServerMessage()
 			userList = userList.substr(endPos + 1);
 		}
 		std::cout << "_________________________________\n";
+		gClientState = QUERY_ACTION;
+		return true;
+	}
+	else if (msgType.compare(CSCA::SV_GET_LOGS) == 0) {
+		std::string logs = serverMessage.substr(serverMessage.find(" ") + 1);
+		std::string clientLogFilename = "ClientLogs.log";
+		FILE* logFile = fopen(clientLogFilename.c_str(), "w");
+		if (logFile == NULL)
+		{
+			std::cout << "\n>> ERROR: Unable to open log file!\n";
+			return true;
+		}
+
+		fprintf(logFile, "%s", logs.c_str());
+
+		fclose(logFile);
+
+		std::cout << "\n> Log file received!\n";
 		gClientState = QUERY_ACTION;
 		return true;
 	}
@@ -468,6 +486,7 @@ void ClientApp::QueryUserAction()
 	case 5:
 		SendMessage(CSCA::SV_GET_LOGS);
 		gClientState = GETTING_LOGS;
+		return;
 	case 6:
 		Exit();
 		return;

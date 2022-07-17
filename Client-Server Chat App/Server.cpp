@@ -1,6 +1,8 @@
 #define NOMINMAX
 #include "Server.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
 
 #include <chrono>
 
@@ -26,6 +28,14 @@ void ServerApp::Run()
 		<< "[__  |___ |__/ |  | |___ |__/    |\\/| |  | |  \\ |___ . \n"
 		<< "___] |___ |  \\  \\/  |___ |  \\    |  | |__| |__/ |___ . \n"
 		<< "                                                       \n";
+
+	// Clear log file
+	FILE* logFile = fopen(LOG_FILENAME.c_str(), "w");
+	if (logFile == NULL)
+	{
+		std::cout << "\n>> ERROR: Couldn't initialize log file!\n";
+		return;
+	}
 
 	// Create socket
 	gListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -53,6 +63,17 @@ void ServerApp::Run()
 	{
 		std::cerr << "\n>> ERROR: Unable to listen on server socket!\n";
 		return;
+	}
+
+	//Server Capacity
+	MaxServerCapacity = 0;
+	while (MaxServerCapacity <= 0)
+	{
+		std::cout << "\n> Enter server capacity: ";
+		std::cin >> MaxServerCapacity;
+
+		if (MaxServerCapacity <= 0)
+			std::cout << "\tERROR: Capacity must be at least 1!";
 	}
 
 	// Prepare sets
@@ -212,14 +233,15 @@ bool ServerApp::HandleRegisterClient(SOCKET socket,
 	if (clientConnection->clientUsername.compare("") == 0)
 	{
 		// Handle SV_FULL
-		if (gConnectedUsers.size() >= MaxServerCapacity)
+		if (gConnectedUsers.size() > MaxServerCapacity)
 		{
+			clientConnection->clientLeaving = true;
 			SendClientMessage(socket, clientConnection, CSCA::SV_FULL);
-			std::cout << "> Refused client due to max server capacity!\n";
+			std::cout << "\n> Refused client due to max server capacity!\n";
 			gShowListeningStatus = true;
 			LogEvent("$register - Refused client due to max server capacity.");
-			RemoveClient(socket, clientConnection, false);
-			return false;
+			//RemoveClient(socket, clientConnection, false);
+			return true;
 		}
 	}
 	else
@@ -268,12 +290,67 @@ bool ServerApp::HandleGetUserList(SOCKET socket, CSCA::ClientConnection* clientC
 
 	std::string getUserLog = "User ";
 	getUserLog.append(clientConnection->clientUsername);
-	getUserLog.append(" requested user list.\n");
+	getUserLog.append(" requested user list.");
 	LogEvent(getUserLog);
 
 	std::cout << "\n> User '" << clientConnection->clientUsername << "' requested user list!\n";
 
 	gShowListeningStatus = true;
+
+	return true;
+}
+
+bool ServerApp::HandleGetLog(SOCKET socket, CSCA::ClientConnection* clientConnection)
+{
+	std::ifstream fileStream(LOG_FILENAME);
+	std::stringstream strBuffer;
+	strBuffer << fileStream.rdbuf();
+	std::string logBuffer = strBuffer.str();
+
+
+	std::string temp = CSCA::SV_GET_LOGS + " ";
+	temp.append(logBuffer);
+	logBuffer = temp;
+	uint8_t logSize = logBuffer.size();
+
+	int result = send(socket, (const char*)&logSize, 1, 0);
+	if (result == 0)
+	{
+		RemoveClient(socket, clientConnection);
+		return false;
+	}
+	if (result == SOCKET_ERROR)
+	{
+		std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+			<< socket << " (SOCKET_ERROR)!\n";
+		RemoveClient(socket, clientConnection);
+		return false;
+	}
+
+	
+	int endOfLinePos = logBuffer.find("\n");
+	while (endOfLinePos != std::string::npos)
+	{
+		int bytesSent = 0;
+		std::string line = logBuffer.substr(0, endOfLinePos+1);
+
+		while (bytesSent < line.size())
+		{
+			result = send(socket, line.c_str() + bytesSent,
+				line.size() - bytesSent, 0);
+			if (result < 0)
+			{
+				std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+					<< socket << " (SOCKET_ERROR)!\n";
+				RemoveClient(socket, clientConnection);
+				return false;
+			}
+			bytesSent += result;
+		}
+
+		logBuffer = logBuffer.substr(endOfLinePos + 1);
+		endOfLinePos = logBuffer.find("\n");
+	}
 
 	return true;
 }
@@ -287,19 +364,19 @@ bool ServerApp::HandleClientMessage(SOCKET socket, CSCA::ClientConnection* clien
 		std::string command = message.find(" ") == std::string::npos
 			? message
 			: message.substr(0, message.find(" "));
-		if (command.compare("$register") == 0)
+		if (command.compare(CSCA::SV_REGISTER_USERNAME) == 0)
 		{
 			return HandleRegisterClient(socket, clientConnection, message);
 		}
-		else if (command.compare("$getlist") == 0)
+		else if (command.compare(CSCA::SV_GET_CLIENT_LIST) == 0)
 		{
 			return HandleGetUserList(socket, clientConnection);
 		}
-		else if (command.compare("$getlog") == 0)
+		else if (command.compare(CSCA::SV_GET_LOGS) == 0)
 		{
-			return true;
+			return HandleGetLog(socket, clientConnection);
 		}
-		else if (command.compare("$exit") == 0)
+		else if (command.compare(CSCA::SV_EXIT) == 0)
 		{
 			LogExit(clientConnection);
 			RemoveClient(socket, clientConnection, false);
@@ -327,6 +404,7 @@ void ServerApp::AcceptNewClient()
 	if (commSocket == INVALID_SOCKET)
 	{
 		std::cerr << "\n>> ERROR: Failed to accept on listenSocket!\n";
+		LogEvent("ERROR: Failed to accept on listenSocket!");
 		return;
 	}
 	else
@@ -337,6 +415,7 @@ void ServerApp::AcceptNewClient()
 		if (gConnectedUsers.find(commSocket) == gConnectedUsers.end())
 		{
 			CSCA::ClientConnection* newClientConnection = new CSCA::ClientConnection;
+			newClientConnection->clientLeaving = false;
 			newClientConnection->readBytesProcessed = 0;
 			newClientConnection->readMessageBuffer = nullptr;
 			newClientConnection->readBuffSize = 0;
@@ -348,9 +427,14 @@ void ServerApp::AcceptNewClient()
 			gConnectedUsers.insert(std::pair<SOCKET, CSCA::ClientConnection*>(
 				commSocket,
 				newClientConnection));
+			LogEvent("New client connected!");
 		}
 		else
 		{
+			std::string errStr = "ERROR: Connection on socket ";
+			errStr.append(std::to_string(commSocket));
+			errStr.append(" was already established!");
+			LogEvent(errStr);
 			std::cerr << "\n>> ERROR: Connection on socket " << commSocket
 				<< " was already established!\n";
 		}
@@ -542,7 +626,16 @@ void ServerApp::LogRegister(CSCA::ClientConnection* clientConnection)
 
 void ServerApp::LogEvent(std::string eventStr)
 {
+	FILE* logFile = fopen(LOG_FILENAME.c_str(), "a");
+	if (logFile == NULL)
+	{
+		std::cout << "\n>> ERROR: Unable to open log file!\n";
+		return;
+	}
 
+	fprintf(logFile, "%s\n", eventStr.c_str());
+	
+	fclose(logFile);
 }
 
 void ServerApp::ShowListeningStatus()
