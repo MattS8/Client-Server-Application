@@ -288,7 +288,8 @@ bool ServerApp::HandleGetUserList(SOCKET socket, CSCA::ClientConnection* clientC
 	message.append(clientList);
 	SendClientMessage(socket, clientConnection, message);
 
-	std::string getUserLog = "User ";
+	std::string getUserLog(CSCA::SV_GET_CLIENT_LIST.c_str());
+	getUserLog.append(" User ");
 	getUserLog.append(clientConnection->clientUsername);
 	getUserLog.append(" requested user list.");
 	LogEvent(getUserLog);
