@@ -306,35 +306,33 @@ bool ServerApp::HandleGetLog(SOCKET socket, CSCA::ClientConnection* clientConnec
 	std::stringstream strBuffer;
 	strBuffer << fileStream.rdbuf();
 	std::string logBuffer = strBuffer.str();
+	logBuffer.append("\n");
+	logBuffer.append(CSCA::SV_GET_LOGS_END);
 
+	size_t logSize = logBuffer.length();
 
-	std::string temp = CSCA::SV_GET_LOGS + " ";
-	temp.append(logBuffer);
-	logBuffer = temp;
-	uint8_t logSize = logBuffer.size();
-
-	int result = send(socket, (const char*)&logSize, 1, 0);
-	if (result == 0)
-	{
-		RemoveClient(socket, clientConnection);
-		return false;
-	}
-	if (result == SOCKET_ERROR)
-	{
-		std::cerr << "\n>> ERROR: Unable to send message to client on socket "
-			<< socket << " (SOCKET_ERROR)!\n";
-		RemoveClient(socket, clientConnection);
-		return false;
-	}
-
-	
 	int endOfLinePos = logBuffer.find("\n");
+	int totalBytesSent = 0;
 	while (endOfLinePos != std::string::npos)
 	{
 		int bytesSent = 0;
 		std::string line = logBuffer.substr(0, endOfLinePos+1);
+		uint8_t lineSize = line.size();
+		int result = send(socket, (const char*)&lineSize, 1, 0);
+		if (result == 0)
+		{
+			RemoveClient(socket, clientConnection);
+			return false;
+		}
+		if (result == SOCKET_ERROR)
+		{
+			std::cerr << "\n>> ERROR: Unable to send message to client on socket "
+				<< socket << " (SOCKET_ERROR)!\n";
+			RemoveClient(socket, clientConnection);
+			return false;
+		}
 
-		while (bytesSent < line.size())
+		while (bytesSent < lineSize)
 		{
 			result = send(socket, line.c_str() + bytesSent,
 				line.size() - bytesSent, 0);
@@ -346,6 +344,7 @@ bool ServerApp::HandleGetLog(SOCKET socket, CSCA::ClientConnection* clientConnec
 				return false;
 			}
 			bytesSent += result;
+			totalBytesSent += result;
 		}
 
 		logBuffer = logBuffer.substr(endOfLinePos + 1);

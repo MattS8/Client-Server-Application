@@ -183,6 +183,29 @@ bool ClientApp::HandleServerMessage()
 {
 	std::string serverMessage(gServerMessage.readMessageBuffer);
 
+	if (gClientState == GETTING_LOGS)
+	{
+		if (serverMessage.compare(CSCA::SV_GET_LOGS_END) == 0)
+		{
+			std::cout << "\n> Log file received!\n";
+			gClientState = QUERY_ACTION;
+			return true;
+		}
+
+		FILE* logFile = fopen(ClientLogFilename.c_str(), "a");
+		if (logFile == NULL)
+		{
+			std::cout << "\n>> ERROR: Unable to open log file!\n";
+			return true;
+		}
+
+		fprintf(logFile, "%s", serverMessage.c_str());
+
+		fclose(logFile);
+
+		return true;
+	}
+
 	std::string msgType = serverMessage.find(" ") == std::string::npos
 		? serverMessage
 		: serverMessage.substr(0, serverMessage.find(" "));
@@ -254,8 +277,8 @@ bool ClientApp::HandleServerMessage()
 	}
 	else
 	{
-		std::cout << "\n>> ERROR: Received unknown message type from server: "
-			<< msgType << "!\n";
+		std::cout << "\n>> ERROR: Received unknown message type from server: '"
+			<< msgType << "'!\n";
 		gClientState = QUERY_ACTION;
 		return true;
 	}
@@ -433,6 +456,7 @@ void ClientApp::DisplayOptions(bool setState /* = true */)
 #pragma region Query Functions
 void ClientApp::QueryUserAction()
 {
+	FILE* logFile;
 	int choice = -1;
 	do
 	{
@@ -484,6 +508,13 @@ void ClientApp::QueryUserAction()
 		gClientState = GETTING_CLIENT_LIST;
 		return;
 	case 5:
+		logFile = fopen(ClientLogFilename.c_str(), "w");
+		if (logFile == NULL)
+		{
+			std::cout << "\n>> ERROR: Unable to open log file!\n";
+			return;
+		}
+		fclose(logFile);
 		SendMessage(CSCA::SV_GET_LOGS);
 		gClientState = GETTING_LOGS;
 		return;

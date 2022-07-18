@@ -36,6 +36,8 @@ class ClientApp
 	bool gSentSize = false;
 	CSCA::SocketInfo QueryTCPSocketInfo();
 	std::string gClientMessages;
+	std::string ClientLogFilename = "ClientLogs.log";
+
 
 	void DisplayOptions(bool bSetState = true);
 	void ConnectToServer();

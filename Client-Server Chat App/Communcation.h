@@ -11,6 +11,7 @@ namespace CSCA
 	const std::string SV_FULL = "SV_FULL";
 	const std::string SV_CLIENT_LIST = "SV_CLIENT_LIST";
 	const std::string SV_GET_LOGS = "$getlog";
+	const std::string SV_GET_LOGS_END = "$getlog END\n";
 	const std::string SV_EXIT = "SV_EXIT";
 
 	struct SocketInfo
