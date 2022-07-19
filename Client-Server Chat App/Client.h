@@ -22,6 +22,7 @@ class ClientApp
 
 	CSCA::SocketInfo gSocketInfo;
 	SOCKET gComSocket;
+	SOCKET gBrodSocket;
 
 	fd_set gMasterSet;
 	fd_set gReadReadySet;
@@ -37,7 +38,6 @@ class ClientApp
 	CSCA::SocketInfo QueryTCPSocketInfo();
 	std::string gClientMessages;
 	std::string ClientLogFilename = "ClientLogs.log";
-
 
 	void DisplayOptions(bool bSetState = true);
 	void ConnectToServer();

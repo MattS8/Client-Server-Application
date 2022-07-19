@@ -14,6 +14,8 @@ namespace CSCA
 	const std::string SV_GET_LOGS_END = "$getlog END\n";
 	const std::string SV_EXIT = "SV_EXIT";
 
+	const unsigned int BC_PORT = 3000;
+
 	struct SocketInfo
 	{
 		unsigned short ipAddr[4];

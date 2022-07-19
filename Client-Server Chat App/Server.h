@@ -15,8 +15,10 @@ private:
 	bool gShowListeningStatus = true;
 
 	int MaxServerCapacity = 10;
+	const int gServerPort = 31337;
 
 	SOCKET gListenSocket;
+	SOCKET gBrodSocket;
 	fd_set gMasterSet;
 	fd_set gReadReadySet;
 	fd_set gSendReadySet;
@@ -24,11 +26,13 @@ private:
 		0,	// Seconds
 		500	// Microseconds
 	};
-
+	sockaddr_in gBcAddr;
 	std::map<SOCKET, CSCA::ClientConnection*> gConnectedUsers;
 	std::map<std::string, SOCKET> gUsernames;
 
 	double GetDeltaTime();
+
+	void SendBroadcastMessage();
 
 	/** Displays '.' update to console upon select timeout. */
 	void ShowListeningStatus();

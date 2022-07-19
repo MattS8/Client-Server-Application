@@ -44,12 +44,32 @@ void ServerApp::Run()
 		std::cerr << "\n>> ERROR: Unable to create communication socket!\n";
 		return;
 	}
+	
+	// Create broadcast socket
+	gBrodSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (gListenSocket == INVALID_SOCKET)
+	{
+		std::cerr << "\n>> ERROR: Unable to create broadcast socket!\n";
+		return;
+	}
+	// Set broadcast options
+	char enabled = '1';
+	setsockopt(gBrodSocket, SOL_SOCKET, SO_BROADCAST, 
+		(const char*)&enabled, sizeof(enabled));
+	setsockopt(gBrodSocket, SOL_SOCKET, SO_REUSEADDR,
+		(const char*)&enabled, sizeof(enabled));
+
+	// Bind broadcast 
+	
+	gBcAddr.sin_family = AF_INET;
+	gBcAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+	gBcAddr.sin_port = htons(CSCA::BC_PORT);
 
 	// Bind socket
 	sockaddr_in serverAddr;
 	serverAddr.sin_family = AF_INET;
 	serverAddr.sin_addr.S_un.S_addr = INADDR_ANY;
-	serverAddr.sin_port = htons(31337);
+	serverAddr.sin_port = htons(gServerPort);
 	int result = bind(gListenSocket, (SOCKADDR*)&serverAddr, sizeof(serverAddr));
 	if (result == SOCKET_ERROR)
 	{
@@ -117,6 +137,8 @@ void ServerApp::Run()
 		// Timeout
 		if (gReadReadySet.fd_count == 0 && !dataSentToClient && timeoutDelay > MaxTimeout)
 		{
+			SendBroadcastMessage();
+
 			if (gShowListeningStatus)
 				ShowListeningStatus();
 			static int dotCount = 0;
@@ -134,6 +156,14 @@ void ServerApp::Run()
 		}
 	} while (true);
 
+}
+
+void ServerApp::SendBroadcastMessage()
+{
+	std::string broadcastMessage = "CSCA:\n127.0.0.1\n31337\n";
+	int result = sendto(gBrodSocket, broadcastMessage.c_str(), 
+		broadcastMessage.size()+1, 0,
+		(sockaddr*) &gBcAddr, sizeof(gBcAddr));
 }
 
 void ServerApp::ReceiveClientMessage(SOCKET socket)

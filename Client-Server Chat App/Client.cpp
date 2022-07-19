@@ -15,6 +15,14 @@ bool ParseIPAddress(std::string ipAddrStr, unsigned short* dest);
 
 void ClientApp::ConnectToServer()
 {
+	// Initialize first to stop Exit malfunctions
+	gServerMessage.readMessageBuffer = nullptr;
+	gServerMessage.readBuffSize = 0;
+	gServerMessage.readBytesProcessed = 0;
+	gServerMessage.sendMessageBuffer = nullptr;
+	gServerMessage.sendBuffSize = 0;
+	gServerMessage.sendBytesProcessed = 0;
+
 	gSocketInfo = QueryTCPSocketInfo(); // TODO Listen over UDP for server connection
 
 // Create comm socket
@@ -56,12 +64,6 @@ void ClientApp::Run()
 		<< "                                                   \n";
 
 	ConnectToServer();
-	gServerMessage.readMessageBuffer = nullptr;
-	gServerMessage.readBuffSize = 0;
-	gServerMessage.readBytesProcessed = 0;
-	gServerMessage.sendMessageBuffer = nullptr;
-	gServerMessage.sendBuffSize = 0;
-	gServerMessage.sendBytesProcessed = 0;
 	gClientState = QUERY_ACTION;
 	FD_SET(gComSocket, &gMasterSet);
 	while (true)
@@ -414,6 +416,8 @@ void ClientApp::Exit(bool sendExitMessage /* = true */)
 	if (gServerMessage.sendMessageBuffer != nullptr)
 		delete[] gServerMessage.sendMessageBuffer;
 
+	closesocket(gComSocket);
+
 	if (sendExitMessage && gIsConnectedToServer)
 	{
 		SendMessage(CSCA::SV_EXIT);
@@ -573,15 +577,84 @@ std::string ClientApp::QueryUsername()
 
 CSCA::SocketInfo ClientApp::QueryTCPSocketInfo()
 {
+	CSCA::SocketInfo socketInfo;
+	std::cout << "> Finding server...";
+	gBrodSocket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (gBrodSocket == SOCKET_ERROR)
+	{
+		std::cout << "\n>> ERROR: unable to create broadcast socket!\n";
+		Exit(false);
+	}
+	char enabled = '1';
+	if (setsockopt(gBrodSocket, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled))
+		< 0
+		||
+		setsockopt(gBrodSocket, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled))
+		< 0)
+	{
+		std::cout << "\n>> ERROR: Unable to set up broadcast socket!\n";
+		closesocket(gBrodSocket);
+		Exit(false);
+		return socketInfo;
+	}
+	sockaddr_in bAddr;
+	bAddr.sin_family = AF_INET;
+	bAddr.sin_port = htons(CSCA::BC_PORT);
+	bAddr.sin_addr.s_addr = INADDR_ANY;
+	if (bind(gBrodSocket, (sockaddr*)&bAddr, sizeof(bAddr)) < 0)
+	{
+		std::cout << ">> ERROR: Unable to bind broadcast socket!\n";
+		closesocket(gBrodSocket);
+		Exit(false);
+	}
+
+	const int bufferSize = 500;
+	char buffer[bufferSize];
+	sockaddr_in senderAddr;
+	int sLen = sizeof(senderAddr);
+	while (true)
+	{
+		int result = recvfrom(gBrodSocket, buffer, bufferSize, 0,
+			(sockaddr*)&senderAddr, &sLen);
+		if (result < 1)
+		{
+			std::cout << "\n>> ERROR: Problem receiving broadcast...\n\t"
+				<< "Press any key to continue...\n";
+			std::getchar();
+
+		}
+		std::string message(buffer);
+		if (message.find("CSCA:") != std::string::npos)
+		{
+			socketInfo.ipAddrStr = message.substr(message.find("\n")+1);
+			message = socketInfo.ipAddrStr;
+			socketInfo.ipAddrStr = socketInfo.ipAddrStr.substr(0,
+				socketInfo.ipAddrStr.find("\n"));
+			std::string gServerPort = message.substr(message.find("\n") + 1);
+			gServerPort = gServerPort.substr(0, gServerPort.find("\n"));
+			socketInfo.port = std::stoi(gServerPort);
+			break;
+		}
+	}
+
+	std::cout << "\n> Server found! \n\tIp Address: "
+		<< socketInfo.ipAddrStr
+		<< "\n\tPort: " << socketInfo.port << "\n";
+
+	closesocket(gBrodSocket);
+
+	return socketInfo;
+
+// MANUAL IMPLEMENTATION
+
 	std::cout
 		<< "         TCP Socket Info         \n"
 		<< "_________________________________\n";
 
-	CSCA::SocketInfo socketInfo;
 	/*****DEBUG****/
-	socketInfo.ipAddrStr = "127.0.0.1";
-	socketInfo.port = 31337;
-	return socketInfo;
+	//socketInfo.ipAddrStr = "127.0.0.1";
+	//socketInfo.port = 31337;
+	//return socketInfo;
 
 	// Get IP Address
 	do
